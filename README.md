@@ -8,6 +8,46 @@
 This repository contains the Pytorch implementation of the method in the paper "Deep Online Fused Video Stabilization".
 And this fork tries to analysis the effectiveness of using this model as pose history smoother. Comparing with traditional pose history smoothing methods, such like moving average, savgol filter.
 
+## Reproduce Our Result
+
+* prepare the environment
+
+```cmd
+conda create -n ml python=3.9
+conda activate ml
+pip install -r requirements.txt
+sudo apt install ffmpeg
+```
+
+* lstm_origin.mp4 (paper origin result, using gyro data)
+
+```cmd
+cd dvs
+python inference.py
+mv ./test/stabilzation/s_114_outdoor_running_trail_daytime_stab.mp4 ./lstm_origin.mp4
+```
+
+* lstm_my.mp4 (our modified ver., w/o real gyro data)
+
+```cmd
+cd dvs
+python inference.py --flag my
+mv ./test/stabilzation/s_114_outdoor_running_trail_daytime_stab.mp4 ./lstm_my.mp4
+```
+
+* classic.mp4 (using moving average)
+
+```cmd
+python src/classic.py
+```
+
+* opencv_vidstab_{fast, dense, gftt}.mp4
+
+```cmd
+python3 -m vidstab --input input_video.mov --output stable_video.avi -k {FAST, DENSE, GFTT}
+ffmpeg -i stable_video.avi opencv_vidsatb_{fast, dense, gftt}.mp4
+```
+
 ## Environment Setting
 Python version >= 3.6
 Pytorch with CUDA >= 1.0.0 (guide is [here](https://pytorch.org/get-started/locally/))
