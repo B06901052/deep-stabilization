@@ -1,11 +1,12 @@
 
   
 
-# Deep Online Fused Video Stabilization
+# Deep Online Fused Video Stabilization with Totally Simulated Pose History
 
 [[Paper]](https://arxiv.org/abs/2102.01279) [[Project Page]](https://zhmeishi.github.io/dvs/) [[Dataset]](https://storage.googleapis.com/dataset_release/all.zip) [[Our Result]](https://storage.googleapis.com/dataset_release/inference_result_release.zip) [[More Results]](https://zhmeishi.github.io/dvs/supp/results.html) 
 
-This repository contains the Pytorch implementation of our method in the paper "Deep Online Fused Video Stabilization".
+This repository contains the Pytorch implementation of the method in the paper "Deep Online Fused Video Stabilization".
+And this fork tries to analysis the effectiveness of using this model as pose history smoother. Comparing with traditional pose history smoothing methods, such like moving average, savgol filter.
 
 ## Environment Setting
 Python version >= 3.6

@@ -150,7 +150,7 @@ def run_epoch(model, loader, cf, epoch, lr, optimizer=None, is_training=True, US
 def train(args = None):
     torch.autograd.set_detect_anomaly(True)
     config_file = args.config
-    cf = yaml.load(open(config_file, 'r'))
+    cf = yaml.load(open(config_file, 'r'), Loader=yaml.Loader)
     
     USE_CUDA = cf['data']["use_cuda"]
     seed = cf['train']["seed"]

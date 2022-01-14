@@ -42,7 +42,7 @@ def run(model, loader, cf, USE_CUDA=True):
         times:              torch.Size([1, 471])
         flo:                torch.Size([1, 470, 270, 480, 2])
         flo_back:           torch.Size([1, 470, 270, 480, 2])
-        real_projections:   torch.Size([1, 471, 12, 3, 3])      #只用來算loss
+        real_projections:   torch.Size([1, 471, 12, 3, 3])
         real_postion:       torch.Size([1, 470, 4])
         ois:                torch.Size([1, 470, 2])
         real_queue_idx:     torch.Size([1])
@@ -52,7 +52,6 @@ def run(model, loader, cf, USE_CUDA=True):
         """
         real_inputs, times, flo, flo_back, real_projections, real_postion, ois, real_queue_idx = data
         print("Fininsh Load data")
-        np.savetxt("real_postion.txt", real_postion.squeeze().numpy())
 
         real_inputs = real_inputs.type(torch.float) #[b,60,84=21*4]
         real_projections = real_projections.type(torch.float) 
@@ -75,6 +74,10 @@ def run(model, loader, cf, USE_CUDA=True):
                 virtual_queue, real_queue_idx, times[:, j], times[:, j+1], times[:, 0], batch_size, number_virtual, real_postion[:,j]) 
             real_inputs_step = real_inputs[:,j,:]
             inputs = torch.cat((real_inputs_step,virtual_inputs), dim = 1)
+            # inputs[:,::4].fill_(0)
+            # inputs[:,1::4].fill_(0)
+            # inputs[:,2::4].fill_(0)
+            # inputs[:,3::4].fill_(1)
 
             # inputs = Variable(real_inputs_step)
             if USE_CUDA:
@@ -106,16 +109,42 @@ def run(model, loader, cf, USE_CUDA=True):
                 if j < 1:
                     for i in range(2):
                         out = model.net(inputs, flo_out, ois_step)
+                        # out = model.net(inputs, torch.zeros_like(flo_out), ois_step)
+                        # out = model.net(inputs, flo_out, torch.zeros_like(ois_step))
+                        # out = model.net(inputs, torch.zeros_like(flo_out), torch.zeros_like(ois_step))
                 else:
                     out = model.net(inputs, flo_out, ois_step)
+                    # out = model.net(inputs, torch.zeros_like(flo_out), ois_step)
+                    # out = model.net(inputs, flo_out, torch.zeros_like(ois_step))
+                    # out = model.net(inputs, torch.zeros_like(flo_out), torch.zeros_like(ois_step))
 
             real_position = real_inputs_step[:,40:44]
             virtual_position = virtual_inputs[:, -4:]
+            # print("real_pos", real_position)
+            # print("vir_pos", virtual_position)
 
             out[:, :3] = activation(out[:, :3])
             out = torch_norm_quat(out)
+            # print(out)
+            # input("out")
 
             pos = torch_QuaternionProduct(virtual_position, real_postion_anchor)
+            # print(pos)
+            # input("pos")
+            
+            tmp = real_inputs_step.view(1,4,21)
+            cur_pos = tmp[:,:,8:13].mean(dim=2)
+            for i in range(21):
+                print(i)
+                print(tmp[:,:,i])
+                input()
+            virtual_position2 = real_inputs_step.view(1,4,21).sort(dim=2)[0][:,:,8:13].mean(dim=2)
+            print("avg_real_pos", virtual_position2)
+            avg_pos = torch_QuaternionProduct(virtual_position2, real_postion_anchor)
+
+            print(avg_pos)
+            input("avg_pos")
+            
             loss_step = model.loss(out, vt_1, virtual_inputs, real_inputs_step, \
                 flo_step, flo_back_step, real_projections_t, real_projections_t_1, real_postion_anchor, \
                 follow = True, optical = True, undefine = True)
@@ -126,7 +155,10 @@ def run(model, loader, cf, USE_CUDA=True):
             if USE_CUDA:
                 out = out.cpu().detach().numpy()
 
+            # out = np.array([[0,0,0,1]])
             virtual_queue = loader.dataset.update_virtual_queue(batch_size, virtual_queue, out, times[:,j+1])
+            print(virtual_queue)
+            input()
     
     run_loss /= step
     print( "\nLoss: follow, angle, smooth, c2_smooth, undefine, optical")
@@ -134,7 +166,7 @@ def run(model, loader, cf, USE_CUDA=True):
     return np.squeeze(virtual_queue, axis=0)
 
 @torch.no_grad()
-def inference(cf, data_path, USE_CUDA, flag):
+def inference(cf, data_path, USE_CUDA):
     checkpoints_dir = cf['data']['checkpoints_dir']
     checkpoints_dir = make_dir(checkpoints_dir, cf)
     files = os.listdir(data_path)
@@ -162,7 +194,7 @@ def inference(cf, data_path, USE_CUDA, flag):
         model.unet.cuda()
 
     print("-----------Load Dataset----------")
-    test_loader = get_inference_data_loader(cf, data_path, no_flo = False, flag=flag)
+    test_loader = get_inference_data_loader(cf, data_path, no_flo = False)
     data = test_loader.dataset.data[0]
 
     start_time = time.time()
@@ -173,7 +205,7 @@ def inference(cf, data_path, USE_CUDA, flag):
     virtual_data[:,0] = data.frame[0,0]
     virtual_queue = np.concatenate((virtual_data, virtual_queue), axis = 0)
 
-    print(virtual_queue.shape)
+    print(virtual_queue.shape) # (471, 5) np.array, (e13, e-1~e-3,e-1~e-3,e-1~e-3)
     time_used = (time.time() - start_time) / 60
 
     print("Time_used: %.4f minutes" % (time_used))
@@ -183,6 +215,7 @@ def inference(cf, data_path, USE_CUDA, flag):
     np.savetxt(virtual_path, virtual_queue, delimiter=' ')
 
     print("------Start Warping Video--------")
+    # all near 1
     grid = get_grid(test_loader.dataset.static_options, \
         data.frame[:data.length], data.gyro, data.ois, virtual_queue[:data.length,1:], no_shutter = False)
     return data, virtual_queue, video_name, grid
@@ -218,10 +251,14 @@ def main(args = None):
         save_path = os.path.join("./test", cf['data']['exp'], data_name[i]+'_stab.mp4')
 
         data_path = os.path.join(dir_path, data_name[i])
-        data, virtual_queue, video_name, grid= inference(cf, data_path, USE_CUDA, args.flag)
+        data, virtual_queue, video_name, grid= inference(cf, data_path, USE_CUDA)
+        # print(grid.shape)
+        # print(grid)
+        # grid[:, :, :, :2] = grid[:, :, :, 2:]
 
         virtual_queue2 = None
         torch.cuda.empty_cache()
+        # visual_result(cf, data, data_name[i], virtual_queue, virtual_queue2 = virtual_queue2, compare_exp = None)
 
         video_path = os.path.join(data_path, video_name+".mp4")
         warp_video(grid, video_path, save_path, frame_number = False)
@@ -231,6 +268,5 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser("Training model")
     parser.add_argument("--config", default="./conf/stabilzation.yaml", help="Config file.")
     parser.add_argument("--dir_path", default="./video")
-    parser.add_argument("--flag", type=str, default="origin")
     args = parser.parse_args()
     main(args = args)

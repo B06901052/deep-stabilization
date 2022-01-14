@@ -208,13 +208,15 @@ def torch_QuaternionReciprocal(q,  USE_CUDA = True):
     return quat
 
 def ProcessGyroData(gyro_data):
+    # gyro: (3746, 5)
     quats = ProcessGyroRotation(gyro_data) 
     size = np.shape(gyro_data)[0]
     axis_dif = np.zeros((size,3)) 
     for i in range(1, size):
         quat_dif = QuaternionProduct(quats[i,:], QuaternionReciprocal(quats[i-1,:]))  
         [axis_dif_cur, angles_cur] = ConvertQuaternionToAxisAngle(quat_dif)  
-        axis_dif[i,:] = axis_dif_cur*angles_cur  
+        axis_dif[i,:] = axis_dif_cur*angles_cur
+    # print(quats.shape) (3546, 4)
     return [axis_dif, quats]
 
 

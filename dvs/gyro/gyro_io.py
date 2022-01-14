@@ -9,6 +9,7 @@ from .gyro_function import (
     CenterZoom, GetGyroAtTimeStamp, get_static, ConvertAxisAngleToQuaternion,
     ConvertAxisAngleToQuaternion_no_angle, ConvertQuaternionToAxisAngle_no_angle
     )
+from scipy.signal import savgol_filter
 
 def load_gyro_mesh(input_name):
     data = LoadStabResult(input_name)
@@ -16,7 +17,7 @@ def load_gyro_mesh(input_name):
     data["warping grid"] = np.reshape(data["warping grid"],(-1,int(w),int(h),4))
     return data
 
-def get_grid(static_options, frame_data, quats_data, ois_data, virtual_data, no_shutter = False):
+def get_grid(static_options, frame_data, quats_data, ois_data, virtual_data, no_shutter = False, center = True):
     grid = []
     result_poses = {}
     result_poses['virtual pose'] = virtual_data
@@ -26,6 +27,9 @@ def get_grid(static_options, frame_data, quats_data, ois_data, virtual_data, no_
         virtual_projection = GetVirtualProjection(static_options, result_poses, metadata, i) 
         grid.append(GetForwardGrid(static_options, real_projections, virtual_projection))
     grid = np.array(grid)
+    if center:
+        center_diff = (np.mean(grid[:, :2, 5:7, 5:7].reshape(-1,2,4), axis=2) - np.array([[0.5,0.5]])).reshape(-1,2,1,1)
+        grid[:,:2] -= savgol_filter(center_diff, 31, 3, axis=0)
     zoom_ratio = 1 / (1 - 2 * static_options["cropping_ratio"])
     curr_grid = CenterZoom(grid, zoom_ratio)
     curr_grid = np.transpose(curr_grid,(0,3,2,1))

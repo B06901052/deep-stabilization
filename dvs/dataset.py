@@ -15,6 +15,9 @@ from gyro import (
     FindOISAtTimeStamp,
     norm_quat
     )
+from utils.utils import (
+    process_frames
+)
 import random
 import numpy as np
 import torchvision.transforms as transforms
@@ -22,6 +25,7 @@ import torch
 from flownet2 import flow_utils
 from scipy import ndimage, misc
 from numpy import linalg as LA
+import cv2
 
 def get_data_loader(cf, no_flo = False):
     size = cf["data"]["batch_size"]
@@ -49,18 +53,18 @@ def get_dataset(cf, no_flo = False):
         time_train = cf["data"]["time_train"]*1000000, transform = test_transform, resize_ratio = resize_ratio, no_flo = no_flo)
     return train_data, test_data
 
-def get_inference_data_loader(cf, data_path, no_flo = False):
-    test_data = get_inference_dataset(cf, data_path, no_flo)
+def get_inference_data_loader(cf, data_path, no_flo = False, flag="origin"):
+    test_data = get_inference_dataset(cf, data_path, no_flo, flag=flag)
     testloader = torch.utils.data.DataLoader(test_data, batch_size=1,shuffle=False, pin_memory=True, num_workers=1)
     return testloader
 
-def get_inference_dataset(cf, data_path, no_flo = False):
+def get_inference_dataset(cf, data_path, no_flo = False, flag="origin"):
     resize_ratio = cf["data"]["resize_ratio"]
     _, test_transform = _data_transforms()
     test_data = Dataset_Gyro(
         data_path, sample_freq = cf["data"]["sample_freq"]*1000000, number_real = cf["data"]["number_real"], 
         time_train = cf["data"]["time_train"]*1000000, transform = test_transform, resize_ratio = resize_ratio,
-        inference_only = True, no_flo = no_flo)
+        inference_only = True, no_flo = no_flo, flag=flag)
     return test_data
 
 def _data_transforms():
@@ -83,10 +87,17 @@ class DVS_data():
         self.flo_path = None
         self.flo_shape = None
         self.flo_back_path = None
+        self.vid = None
+        self.trajectory = None
+        self.transforms = None
+        self.homography = None
+        self.quaternion = None
+        self.w = None
+        self.h = None
 
 class Dataset_Gyro(Dataset):
     def __init__(self, path, sample_freq = 33*1000000, number_real = 10, time_train = 2000*1000000, \
-        transform = None, inference_only = False, no_flo = False, resize_ratio = 1): 
+        transform = None, inference_only = False, no_flo = False, resize_ratio = 1, flag="origin"): 
         r"""
         Arguments:
             sample_freq: real quaternions [t-sample_freq*number_real, t+sample_freq*number_real] ns
@@ -99,6 +110,7 @@ class Dataset_Gyro(Dataset):
         self.resize_ratio = resize_ratio
         self.static_options = get_static()
         self.inference_only = inference_only
+        self.flag = flag
 
         self.ois_ratio = np.array([self.static_options["crop_window_width"] / self.static_options["width"], \
             self.static_options["crop_window_height"] / self.static_options["height"]]) * 0.01
@@ -143,6 +155,17 @@ class Dataset_Gyro(Dataset):
                 print("flo_shape:", dvs_data.flo_shape, end="    ")
             elif f == "flo_back":
                 dvs_data.flo_back_path, _ = LoadFlow(file_path)
+            elif f.endswith(".mp4") and self.flag=="my":
+                f = os.path.join(path, f)
+                cap = cv2.VideoCapture(f)
+                dvs_data.w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                dvs_data.h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                n_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+                dvs_data.vid = []
+                for _ in range(n_frames):
+                    dvs_data.vid.append(cap.read()[1])
+                dvs_data.trajectory, dvs_data.transforms, dvs_data.homography, dvs_data.quaternion = process_frames(dvs_data.vid, dvs_data.w, dvs_data.h)
+                
             
         print()
         if dvs_data.flo_path is not None:
@@ -166,12 +189,18 @@ class Dataset_Gyro(Dataset):
 
         for i in range(self.number_train):
             sample_time[i+1] = get_timestamp(dvs_data.frame, first_id + i)
-            real_postion[i] = GetGyroAtTimeStamp(dvs_data.gyro, sample_time[i+1] - self.sample_freq)
+            if self.flag == "origin":
+                real_postion[i] = GetGyroAtTimeStamp(dvs_data.gyro, sample_time[i+1] - self.sample_freq)
+            elif self.flag == "my":
+                real_postion[i] = dvs_data.quaternion[first_id+i]
             sample_ois[i] = self.get_ois_at_timestamp(dvs_data.ois, sample_time[i+1])
             for j in range(-self.number_real, self.number_real+1):
                 index = j + self.number_real
                 time_stamp = sample_time[i+1] + self.sample_freq * j 
-                sample_data[i, index] = self.get_data_at_timestamp(dvs_data.gyro, dvs_data.ois, time_stamp, real_postion[i])
+                if self.flag == "origin":
+                    sample_data[i, index] = self.get_data_at_timestamp(dvs_data.gyro, dvs_data.ois, time_stamp, real_postion[i])
+                elif self.flag == "my":
+                    sample_data[i, index] = QuaternionProduct(real_postion[np.clip(i+j,0,len(real_postion)-1)], QuaternionReciprocal(real_postion[i]))
                 
         sample_data = np.reshape(sample_data, (self.number_train, (2*self.number_real+1) * self.unit_size))
         return sample_data, sample_time, first_id, real_postion, sample_ois
